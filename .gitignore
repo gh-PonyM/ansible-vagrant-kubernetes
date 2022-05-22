@@ -1,0 +1,9 @@
+.ansible/
+.vagrant/
+credentials/
+.fact_cache/
+.vscode/
+.idea/
+logs/*
+.password
+docs/inventory/

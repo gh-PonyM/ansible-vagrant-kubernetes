@@ -1,0 +1,337 @@
+---
+# Excute command on both machines: ansible-console -i inventories/k8s_learn.yml -u chamer -b
+# Run playbook: ansible-playbook -i inventories/k8s_learn.yml -u chamer k8s_learn.yml
+
+- hosts: k8s_cluster
+  gather_facts: true
+  become: true
+  tags: prereq
+  tasks:
+    - name: update system
+      apt:
+        upgrade: true
+        update_cache: true
+        cache_valid_time: 86400
+
+    - name: Setting advertise address and domain name in host_facts for other hosts
+      set_fact:
+        k8s_fqdn: "{{ k8s_fqdn }}"
+        k8s_interface: "{{ k8s_interface }}"
+
+    - name: install some tools
+      apt:
+        name:
+          - net-tools
+          - netcat
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+
+    - name: Enable br_netfilter kernel module
+      modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Copy kernel config for containerd
+      ansible.builtin.copy:
+        src: templates/etc/modules-load.d/containerd.conf
+        dest: /etc/modules-load.d/containerd.conf
+        owner: root
+
+    - name: Enable overlay kernel module for CRI containerd
+      modprobe:
+        name: overlay
+        state: present
+
+    - name: Copy kernel config for containerd
+      copy:
+        src: templates/etc/modules-load.d/containerd.conf
+        dest: /etc/modules-load.d/containerd.conf
+        owner: root
+
+    - name: Remove swapfile from /etc/fstab
+      mount:
+        name: "{{ item }}"
+        fstype: swap
+        state: absent
+      with_items:
+        - swap
+        - none
+
+    - name: Disable swap
+      command: swapoff -a
+      when: ansible_swaptotal_mb > 0
+
+    - name: Sysctl settings
+      sysctl:
+        name: "{{ item }}"
+        value: "{{ harden_sysctl_settings[item] }}"
+        sysctl_set: true
+        sysctl_file: /etc/sysctl.d/99-k8s.conf
+        reload: true
+      loop: "{{ harden_sysctl_settings|flatten }}"
+
+    - name: Check if reboot required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required_file
+
+    - name: Reboot if required
+      reboot:
+        msg: Rebooting due to a kernel update
+      when: reboot_required_file.stat.exists
+
+- hosts: k8s_cluster
+  gather_facts: false
+  become: true
+  tags: dns
+  tasks:
+    - name: Add IP's all other nodes in the cluster including itself
+      blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        insertafter: '^127\.0\.0\.1'
+        block: |
+          {% for host in ansible_play_hosts %}
+          {{ hostvars[host]['ansible_' + hostvars[host].k8s_interface].ipv4.address}} {{ hostvars[host].k8s_fqdn }}
+          {% endfor %}
+
+- hosts: k8s_cluster
+  gather_facts: true
+  become: true
+  tags: cri
+
+  tasks:
+    - name: install and configure docker
+      block:
+        - name: install docker.io
+          apt:
+            name: docker.io
+        - name: put /etc/docker/daemon.json in place
+          copy:
+            dest: /etc/docker/daemon.json
+            content: |
+              {
+                "exec-opts": ["native.cgroupdriver=systemd"],
+                "log-driver": "json-file",
+                "log-opts": {
+                  "max-size": "100m"
+                },
+                "storage-driver": "overlay2"
+              }
+            owner: root
+            group: root
+            mode: '0600'
+          notify: Restart docker deamon
+
+    - name: check what cgroup version systemd uses
+      command: grep cgroup /proc/filesystems
+      register: cgroup_systemd
+      failed_when:
+        - "'cgroup2' not in cgroup_systemd.stdout"
+      changed_when: false
+
+  handlers:
+    - name: Restart containerd service
+      service:
+        name: contaierd
+        state: restarted
+    - name: Restart docker deamon
+      service:
+        name: docker
+        state: restarted
+
+
+- hosts: k8s_cluster
+  gather_facts: true
+  become: true
+  tags: k8s
+
+  tasks:
+    - name: add kubernetes repo key
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+        keyring: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+
+    - name: add kubernetes repository
+      apt_repository:
+        repo: deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main
+        state: present
+        filename: kubernetes.list
+        update_cache: true
+
+    - name: install kubelet, kubeadm and kubectl
+      apt:
+        name:
+          - "kubelet={{ kubernetes_version }}-00"
+          - "kubeadm={{ kubernetes_version }}-00"
+          - "kubectl={{ kubernetes_version }}-00"
+        state: present
+
+    - name: Hold kubelet, kubeadm and kubectl
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    # see also content of /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+    - name: Configure KUBELET_EXTRA_ARGS via /etc/default/kubelet
+      copy:
+        dest: /etc/default/kubelet
+        content: "KUBELET_EXTRA_ARGS={{ extra_args | join(' ') }}"
+        group: root
+        owner: root
+        mode: "0644"
+      vars:
+        extra_args:
+          - "--node-ip={{ advertise_address }}"
+          - '--container-runtime-endpoint="unix:///run/containerd/containerd.sock"'
+      when:
+        - ansible_user == 'vagrant'
+      notify: Restart kubelet
+
+  handlers:
+    - name: Restart kubelet
+      service:
+        name: kubelet
+        daemon_reload: yes
+        state: restarted
+
+
+- hosts: k8s_controller
+  gather_facts: true
+  become: true
+  tags: controller
+
+  tasks:
+    - debug: var=ansible_fqdn
+    - debug: var=k8s_fqdn
+    - debug: var=advertise_address
+    - debug: var=ansible_hostname
+    - debug: var=inventory_hostname
+
+    - name: Create kubeadm init config (only for docker)
+      template:
+        src: "templates/controller/{{ cfg_file }}"
+        dest: "/root/kubeadm-config.yaml"
+        owner: root
+        group: root
+        mode: 0644
+      vars:
+        cfg_file: kubeadm-init.yml
+
+    - name: check if /var/lib/kubelet/config.yaml exists (only after kubeadm init)
+      stat:
+        path: /var/lib/kubelet/config.yaml
+      register: kubelet_cfg
+
+    - name: Run kubeadm init test and kubeadm init
+      block:
+        - name: launch test command
+          command: "kubeadm init --config=kubeadm-config.yaml --node-name {{ k8s_fqdn }} --dry-run"
+          args:
+            chdir: /root
+          register: dry_run
+          failed_when:
+            - "'kubeadm join' not in dry_run.stdout"
+
+        - name: Run kubeadm init
+          command: "kubeadm init --config=kubeadm-config.yaml --node-name {{ k8s_fqdn }} --upload-certs"
+          args:
+            chdir: /root
+          register: kubeadm_init
+
+        - name: write kubeadm init output to file
+          copy:
+            dest: /root/init.out
+            content: "{{ kubeadm_init.stdout }}"
+
+      when: not kubelet_cfg.stat.exists
+
+    - name: Create .kube directory
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Copy /etc/kubernetes/admin.conf to /home/<item>/.kube/config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ item }}/.kube/config"
+        owner: "{{ item }}"
+        group: "{{ item }}"
+        mode: 'u+x'
+        remote_src: true
+      loop: "{{ kubectl_users | default([ansible_user]) }}"
+      ignore_errors: true
+
+    - name: Get kubectl bash completion
+      command: kubectl completion bash
+      register: ctl_bash_c
+      changed_when: false
+
+    - name: Add completions to .bashrc
+      blockinfile:
+        path: "/home/{{ item }}/.bashrc"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: "{{ ctl_bash_c.stdout }}"
+      loop: "{{ kubectl_users | default([ansible_user]) }}"
+      ignore_errors: true
+
+    - name: Get Calico Manifest
+      get_url:
+        url: https://docs.projectcalico.org/manifests/calico.yaml
+        dest: "/home/{{ ansible_user }}/calico.yaml"
+      become: false
+
+    - name: Apply the calico manifest
+      shell: kubectl apply -f calico.yaml > apply_calico.out
+      args:
+        chdir: "/home/{{ ansible_user }}"
+        creates: "/home/{{ ansible_user }}/apply_calico.out"
+      become: false
+
+#    - name: Check tokens
+#      command: kubeadm token list
+#      register: token_list
+#      changed_when: false
+
+    - name: Generate join command for workers
+      command: kubeadm token create --print-join-command
+      register: j_cmd
+      tags:
+        - cluster_join
+      when: join_command is not defined
+
+    - name: Set the join command fact
+      set_fact:
+        join_command: "{{ j_cmd.stdout }}"
+        cacheable: true
+      when: j_cmd.changed
+      tags:
+        - cluster_join
+
+- hosts: k8s_worker
+  gather_facts: true
+  become: true
+  tags:
+    - worker
+    - cluster_join
+
+  tasks:
+    - name: Join the cluster
+      shell: "{{ join_command }} > worker_join.out"
+      register: worker_join
+      args:
+        chdir: /root
+        creates: /root/worker_join.out
+      vars:
+        controller_host: "{{ groups['k8s_controller'] | first }}"
+        join_command: "{{ hostvars[controller_host].join_command }}"

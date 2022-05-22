@@ -1,0 +1,25 @@
+---
+
+kubernetes_version: 1.22.1
+
+# Ports: https://kubernetes.io/docs/reference/ports-and-protocols/
+api_server_port: 6443
+worker_kubelet_api_port: 10250
+k8s_pod_subnet: '192.168.0.0/16'
+
+# the interface with IP range for nodes to communicate, can be overwritten per host
+k8s_interface: ens4
+
+# IP for kubelet extra args --node-ip
+advertise_address: "{{hostvars[inventory_hostname]['ansible_' + k8s_interface].ipv4.address}}"
+
+# FQDN that you would use per host, for testing we add .local, would default to ansible_host
+k8s_fqdn: "{{ ansible_hostname }}.local"
+
+harden_sysctl_settings:
+  "net.ipv4.ip_forward": 1
+  "net.ipv6.conf.default.forwarding": 1
+  "net.ipv6.conf.all.forwarding": 1
+  "net.bridge.bridge-nf-call-ip6tables": 1
+  "net.bridge.bridge-nf-call-iptables": 1
+  "net.ipv6.conf.all.disable_ipv6": 0
