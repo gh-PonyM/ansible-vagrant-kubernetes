@@ -27,9 +27,11 @@ Start all machines:
 
 Starting the machines this way, we ensure all machines are booted before the get provisioned.
 
-Since libvirt supports parallel start of the VM's, you can run this
+Since libvirt provider supports parallel start of the VM's, you can run this simpler command.
 
-    vagrant up --parellel --provider libvirt
+    vagrant up --provider libvirt
+
+**Note**: A small benchmark I ran showed times of **6m25s for virtualbox** v.s. **4m57s with libvirt**.
 
 (Re)Provision them:
 
