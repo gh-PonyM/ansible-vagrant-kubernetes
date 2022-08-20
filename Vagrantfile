@@ -1,4 +1,5 @@
-PROVIDER='libvirt'
+# with vagrant-libvirt plugin and libvirt installed, use libvirt as provider
+PROVIDER='virtualbox'
 ENV['VAGRANT_DEFAULT_PROVIDER'] = PROVIDER
 IMAGE_NAME = "generic/ubuntu2110"
 VAGRANT_API_VERSION = "2"
@@ -71,7 +72,6 @@ Vagrant.configure(VAGRANT_API_VERSION) do |config|
 
       # This is crucial in order to run the playbook on all hosts in parallel
       ansible.limit = 'all'
-      ansible.raw_arguments = ["-t", "cluster_join"]
     end
   end
 end
