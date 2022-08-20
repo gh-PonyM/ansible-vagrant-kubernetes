@@ -23,7 +23,13 @@ The ansible config `ansible_cfg` sets some basic config for ansible, e.g. you ca
 
 Start all machines:
 
-    vagrant up
+    vagrant up --no-provision && vagrant provision
+
+Starting the machines this way, we ensure all machines are booted before the get provisioned.
+
+Since libvirt supports parallel start of the VM's, you can run this
+
+    vagrant up --parellel --provider libvirt
 
 (Re)Provision them:
 

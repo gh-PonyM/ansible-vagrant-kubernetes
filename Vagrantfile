@@ -1,5 +1,8 @@
 # with vagrant-libvirt plugin and libvirt installed, use libvirt as provider
-PROVIDER='virtualbox'
+# when changing, remove the vagrant network interface with `VBoxManage hostonlyif remove vboxnet0`
+# Also make sure you delete the fact cache where the join command is stored
+
+PROVIDER='libvirt'
 ENV['VAGRANT_DEFAULT_PROVIDER'] = PROVIDER
 IMAGE_NAME = "generic/ubuntu2204"
 VAGRANT_API_VERSION = "2"
