@@ -1,7 +1,7 @@
 # with vagrant-libvirt plugin and libvirt installed, use libvirt as provider
 PROVIDER='virtualbox'
 ENV['VAGRANT_DEFAULT_PROVIDER'] = PROVIDER
-IMAGE_NAME = "generic/ubuntu2110"
+IMAGE_NAME = "generic/ubuntu2204"
 VAGRANT_API_VERSION = "2"
 PLAYBOOK = 'k8s.yml'
 
