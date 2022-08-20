@@ -124,7 +124,7 @@
             owner: root
             group: root
             mode: '0600'
-          notify: Restart docker deamon
+          notify: Restart docker daemon
 
     - name: check what cgroup version systemd uses
       command: grep cgroup /proc/filesystems
@@ -138,7 +138,7 @@
       service:
         name: contaierd
         state: restarted
-    - name: Restart docker deamon
+    - name: Restart docker daemon
       service:
         name: docker
         state: restarted
