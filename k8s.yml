@@ -298,11 +298,6 @@
         creates: "/home/{{ ansible_user }}/apply_calico.out"
       become: false
 
-#    - name: Check tokens
-#      command: kubeadm token list
-#      register: token_list
-#      changed_when: false
-
     - name: Generate join command for workers
       command: kubeadm token create --print-join-command
       register: j_cmd
@@ -324,8 +319,26 @@
   tags:
     - worker
     - cluster_join
+  vars:
+    worker_rejoin: false
 
   tasks:
+    - name: Run kubeadm reset
+      shell: kubeadm reset --force
+      when: worker_rejoin
+
+    - name: Remove /etc/kubelet.conf
+      file:
+        path: /etc/kubelet.conf
+        state: absent
+      when: worker_rejoin
+
+    - name: Remove join artifact
+      file:
+        path: "{{ worker_join_artifact }}"
+        state: absent
+      when: worker_rejoin
+
     - name: Join the cluster
       shell: "{{ join_command }} > worker_join.out"
       register: worker_join
