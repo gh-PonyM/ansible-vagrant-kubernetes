@@ -34,12 +34,6 @@
         name: br_netfilter
         state: present
 
-    - name: Copy kernel config for containerd
-      ansible.builtin.copy:
-        src: templates/etc/modules-load.d/containerd.conf
-        dest: /etc/modules-load.d/containerd.conf
-        owner: root
-
     - name: Enable overlay kernel module for CRI containerd
       modprobe:
         name: overlay
@@ -136,7 +130,7 @@
   handlers:
     - name: Restart containerd service
       service:
-        name: contaierd
+        name: containerd
         state: restarted
     - name: Restart docker daemon
       service:
